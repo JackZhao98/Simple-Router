@@ -27,18 +27,173 @@ namespace simple_router {
 void
 SimpleRouter::handlePacket(const Buffer& packet, const std::string& inIface, int nat_flag)
 {
-  std::cerr << "Got packet of size " << packet.size() << " on interface " << inIface << std::endl;
+    std::cerr << "Got packet of size " << packet.size() << " on interface " << inIface << std::endl;
 
-  const Interface* iface = findIfaceByName(inIface);
-  if (iface == nullptr) {
-    std::cerr << "Received packet, but interface is unknown, ignoring" << std::endl;
+    const Interface* iface = findIfaceByName(inIface);
+    if (iface == nullptr) {
+        std::cerr << "Received packet, but interface is unknown, ignoring" << std::endl;
+        return;
+    }
+
+    std::cerr << getRoutingTable() << std::endl;
+
+    // FILL THIS IN
+    
+    // Verify packet size, if smaller than ether min size, return
+    if (packet.size() < sizeof(ethernet_hdr)) {
+        std::cerr << "[ERROR] Wrong packet length! Ignored.\n";
+        return;
+    }
+    
+    
+    
+    // Then, verify the address.
+    std::string iface_addr = macToString(iface -> addr);
+    std::string packet_dest = macToString(packet);
+
+    if ((packet_dest != iface_addr) && (packet_dest != "FF:FF:FF:FF:FF:FF") && (packet_dest != "ff:ff:ff:ff:ff:ff")) {
+        std::cerr << "[NOTE] Packet not destined to this router!\n";
+        return;
+    }
+    
+    Buffer packet_copy(packet);
+    uint8_t* packet_hdr = packet_copy.data();
+    ethernet_hdr* ether_hdr = (ethernet_hdr*)packet_header;
+    
+    auto ether_type = ether_hdr -> ether_type;
+    if (ether_type == htons(ethertype_arp)) {
+        // TODO: Handle ARP Packets
+    }
+    else if (ether_type == htons(ethertype_ip)) {
+        // TODO: Handle IPv4 Packets
+    }
+    else {
+        std::cerr << "[ERROR] Unknown type of packet, ignored.\n";
+        return;
+    }
+    
+    
+    
+//
+//    auto EtherType = ethertype((const uint8_t *)packet.data());
+//
+//    if (EtherType == ethertype_ip) {
+//        // For this IPv4 packet...
+//        std::cout << "[NOTE] Checking IPv4...\n";
+//        ip_hdr* ip_header = (ip_hdr *)(packet_ptr + ether_size);
+//
+//        // verify its minimum length
+//        if (packet.size() < (ether_size + sizeof(ip_hdr))) {
+//            std::cerr << "[ERROR] Packet size is smaller than the minimum size, discarded...\n";
+//            return;
+//        }
+//
+//        // verify its checksum
+//        uint16_t tmp_cksum = ip_header -> ip_sum;
+//        ip_header -> ip_sum = 0;
+//        uint16_t new_cksum = cksum(ip_headerm sizeof(ip_hdr));
+//
+//        if (new_cksum != tmp_cksum) {
+//            std::cerr << "[ERROR] Invalid checksum, ignore...\n";
+//            return;
+//        }
+//
+//        // Decrement TTL
+//        ip_header -> ip_ttl --;
+//        if (ip_header -> ip_ttl <= 0) {
+//            std::cerr << "[ERROR] Oops, timeout. Packet has exceeded TTL.\n";
+//            return;
+//        }
+//        // Recompute the checksum after TTL decrement.
+//        ip_header->ip_sum = cksum(ip_header, sizeof(ip_hdr));
+//
+//        uint32_t dest = ip_header -> ip_dst;
+//        bool is_destined = false;
+//        for (auto iter = m_ifaces.begin(); iter != m_ifaces.end(); iter++) {
+//            if (it -> ip == dest) {
+//                // Found the destinition ip address
+//                is_destined = true;
+//                break;
+//            }
+//        }
+//
+//        if (is_destined) {
+//            // case (1), datapacket is for this router, need to check for ICMP payload
+//            // Step 1: ICMP?
+//            if (ip_header -> ip_p != ip_protocol_icmp) {
+//                std::cerr << "[WARNING] Packet is destined to router but not carrying ICMP payload, discarded.\n";
+//                return;
+//            }
+//            if (ip_header -> )
+//            ethernet_hdr* ether_header = (ethernet_hdr *)packet_ptr;
+//
+//        }
+//
+//        else {
+//            // case (2), use the longest prefix match to find a next-hop IP
+//            //  and attemp to forward to that address.
+//        }
+//
+//    }
+//    else if (EtherType == ethertype_arp) {
+//        // This is an ARP packet
+//    }
+//    else {
+//        std::cerr << "[ERROR] Packet's ether type is neitehr IPv4 nor ARP.\n";
+//        return;
+//    }
+}
+
+// New Class methods, TODO: Add definition to hpp file
+void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface* iface) {
+    arp_hdr* arp_header = (arp_hdr*)arp;
+    
+    if (arp_header -> arp_hrd != htons(arp_hrd_ethernet)) return;
+    
+    uint16_t ARP_OP = ntohs(arp_header->arp_op);
+    
+    if (ARP_OP == arp_op_request) {
+        
+        std::cout << "[DEBUG] Handling arp_op_request...\n";
+        
+        if (arp_header -> arp_tip != iface -> ip) {
+            // It means the request is not for this router
+            return;
+        }
+        // Preparing output buffer
+        Buffer outputBuffer(sizeof(ethernet_hdr) + sizeof(arp_hdr));
+        uint8_t* output_hdr = (uint8_t *)outputBuffer.data();
+        
+        
+        
+        // Generate Ether header
+        ethernet_hdr* output_e_hdr = (ethernet_hdr *)output_hdr;
+        output_e_hdr -> ether_type = htons(ethertype_arp);
+        memcpy(output_e_hdr -> ether_shost, iface->addr.data(), ETHER_ADDR_LEN);
+        memcpy(output_e_hdr -> ether_dhost, sender_mac, ETHER_ADDR_LEN);
+        
+        // Generate ARP header
+        arp_hdr* output_a_hdr = (arp_hdr *)(output_hdr + sizeof(ethernet_hdr));
+        memcpy(output_a_hdr, arp_header, sizeof(arp_hdr));
+        output_a_hdr -> arp_op = htons(arp_op_reply);
+        output_a_hdr -> arp_sip = iface -> ip;
+        output_a_hdr -> arp_tip = arp_header -> arp_sip;
+        memcpy(output_a_hdr -> arp_tha, arp_header -> arp_sha, ETHER_ADDR_LEN);
+        memcpy(output_a_hdr -> arp_sha, iface->addr.data(), ETHER_ADDR_LEN);
+        
+        sendPacket(outputBuffer, iface->name);
+    }
+    
+    else if (ARP_OP == arp_op_reply) {
+        std::cout << "[DEBUG] Handling arp_op_reply...\n";
+        
+    }
+    
+    else {
+        std::cerr << "[handle_arp] Unknown ARP type. Ignored\n";
+    }
+
     return;
-  }
-
-  std::cerr << getRoutingTable() << std::endl;
-
-  // FILL THIS IN
-
 }
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////

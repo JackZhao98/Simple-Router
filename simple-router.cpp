@@ -63,85 +63,16 @@ SimpleRouter::handlePacket(const Buffer& packet, const std::string& inIface, int
     auto ether_type = ether_hdr -> ether_type;
     if (ether_type == htons(ethertype_arp)) {
         // TODO: Handle ARP Packets
+        handle_arp(packet_hdr + sizeof(ethernet_hdr), ether_hdr -> ether_shost, iface);
     }
     else if (ether_type == htons(ethertype_ip)) {
         // TODO: Handle IPv4 Packets
+        handle_ipv4(packet, inIface, nat_flag);
     }
     else {
         std::cerr << "[ERROR] Unknown type of packet, ignored.\n";
         return;
     }
-    
-    
-    
-//
-//    auto EtherType = ethertype((const uint8_t *)packet.data());
-//
-//    if (EtherType == ethertype_ip) {
-//        // For this IPv4 packet...
-//        std::cout << "[NOTE] Checking IPv4...\n";
-//        ip_hdr* ip_header = (ip_hdr *)(packet_ptr + ether_size);
-//
-//        // verify its minimum length
-//        if (packet.size() < (ether_size + sizeof(ip_hdr))) {
-//            std::cerr << "[ERROR] Packet size is smaller than the minimum size, discarded...\n";
-//            return;
-//        }
-//
-//        // verify its checksum
-//        uint16_t tmp_cksum = ip_header -> ip_sum;
-//        ip_header -> ip_sum = 0;
-//        uint16_t new_cksum = cksum(ip_headerm sizeof(ip_hdr));
-//
-//        if (new_cksum != tmp_cksum) {
-//            std::cerr << "[ERROR] Invalid checksum, ignore...\n";
-//            return;
-//        }
-//
-//        // Decrement TTL
-//        ip_header -> ip_ttl --;
-//        if (ip_header -> ip_ttl <= 0) {
-//            std::cerr << "[ERROR] Oops, timeout. Packet has exceeded TTL.\n";
-//            return;
-//        }
-//        // Recompute the checksum after TTL decrement.
-//        ip_header->ip_sum = cksum(ip_header, sizeof(ip_hdr));
-//
-//        uint32_t dest = ip_header -> ip_dst;
-//        bool is_destined = false;
-//        for (auto iter = m_ifaces.begin(); iter != m_ifaces.end(); iter++) {
-//            if (it -> ip == dest) {
-//                // Found the destinition ip address
-//                is_destined = true;
-//                break;
-//            }
-//        }
-//
-//        if (is_destined) {
-//            // case (1), datapacket is for this router, need to check for ICMP payload
-//            // Step 1: ICMP?
-//            if (ip_header -> ip_p != ip_protocol_icmp) {
-//                std::cerr << "[WARNING] Packet is destined to router but not carrying ICMP payload, discarded.\n";
-//                return;
-//            }
-//            if (ip_header -> )
-//            ethernet_hdr* ether_header = (ethernet_hdr *)packet_ptr;
-//
-//        }
-//
-//        else {
-//            // case (2), use the longest prefix match to find a next-hop IP
-//            //  and attemp to forward to that address.
-//        }
-//
-//    }
-//    else if (EtherType == ethertype_arp) {
-//        // This is an ARP packet
-//    }
-//    else {
-//        std::cerr << "[ERROR] Packet's ether type is neitehr IPv4 nor ARP.\n";
-//        return;
-//    }
 }
 
 // New Class methods, TODO: Add definition to hpp file
@@ -163,9 +94,7 @@ void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface
         // Preparing output buffer
         Buffer outputBuffer(sizeof(ethernet_hdr) + sizeof(arp_hdr));
         uint8_t* output_hdr = (uint8_t *)outputBuffer.data();
-        
-        
-        
+         
         // Generate Ether header
         ethernet_hdr* output_e_hdr = (ethernet_hdr *)output_hdr;
         output_e_hdr -> ether_type = htons(ethertype_arp);
@@ -176,17 +105,32 @@ void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface
         arp_hdr* output_a_hdr = (arp_hdr *)(output_hdr + sizeof(ethernet_hdr));
         memcpy(output_a_hdr, arp_header, sizeof(arp_hdr));
         output_a_hdr -> arp_op = htons(arp_op_reply);
-        output_a_hdr -> arp_sip = iface -> ip;
-        output_a_hdr -> arp_tip = arp_header -> arp_sip;
-        memcpy(output_a_hdr -> arp_tha, arp_header -> arp_sha, ETHER_ADDR_LEN);
         memcpy(output_a_hdr -> arp_sha, iface->addr.data(), ETHER_ADDR_LEN);
+        output_a_hdr -> arp_sip = iface -> ip;
+        memcpy(output_a_hdr -> arp_tha, arp_header -> arp_sha, ETHER_ADDR_LEN);
+        output_a_hdr -> arp_tip = arp_header -> arp_sip;
         
         sendPacket(outputBuffer, iface->name);
     }
     
     else if (ARP_OP == arp_op_reply) {
         std::cout << "[DEBUG] Handling arp_op_reply...\n";
+        uint32_t sip = arp_header -> arp_sip;
+        Buffer mac(ETHER_ADDR_LEN);
+        memcpy(mac.data(), arp_header -> arp_sha, ETHER_ADDR_LEN);
         
+        std::shared_ptr<ArpRequest> request = m_arp.insertArpEntry(mac, sip);
+        
+        if (request) {
+            for (auto packetIter = request -> packets.begin(); packetIter != packets.end(); packetIter ++) {
+                ethernet_hdr * tmp_e_header = (ethernet_hdr *)(packetIter -> packet.data());
+                memcpy(tmp_e_header -> ether_shost, iface -> addr.data(), ETHER_ADDR_LEN);
+                memcpy(tmp_e_header -> ether_dhost, arp_header -> arp_sha, ETHER_ADDR_LEN);
+                
+                sendPacket(packetIter -> packet, packetIter -> iface);
+            }
+            m_arp.removeRequest(request);
+        }
     }
     
     else {
@@ -195,6 +139,202 @@ void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface
 
     return;
 }
+
+void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, int& nat) {
+    // TODO: Veridy packet_size
+    if (packet.size() < (sizeof(ethernet_hdr) + sizeof(ip_hdr))) {
+        std::cerr << "[handle_ip] IPv4 packet received, but the size is too small.\n";
+        return;
+    }
+    Buffer new_packet(packet);
+    ip_hdr* ip_header = (ip_hdr *)(new_packet.data() + sizeof(ethernet_hdr));
+    // TODO: Verify Checksum
+    uint16_t checksum = ip_header -> ip_sum;
+    ip_header -> ip_sum = 0;
+    if (checksum != cksum(ip_header, sizeof(ip_hdr))) {
+        std::cerr << "[handle_ip] IPv4 packet received, but the checksum value is incorrect.\n";
+        return;
+    }
+    
+    /*
+      ##############
+        TODO: NAT!!
+      ##############
+     
+     */
+    
+    bool NAT_processed = false;
+    
+    /*
+      ##############
+        END OF NAT!!
+      ##############
+     
+     */
+    const Interface* dest = findIfaceByIp(ip_header -> ip_dst);
+    
+    if (dest && !NAT_processed) {
+        std::cerr << "[DEBUG] handle_ip: ICMP is detined for this router\n";
+        if (ip_header -> ip_p != ip_protocol_icmp) {
+            std::cerr << "[ERROR] handle_ip: Protocol is not icmp.\n";
+            return;
+        }
+        icmp_hdr *icmp_header = (icmp_hdr *)(new_packet.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
+        if (icmp_header -> icmp_type != 8) {
+            std::cerr << "[ERROR] hadnle_ip: icmp_type is not 8: " << icmp_header->icmp_type << std::endl;
+            return;
+        }
+        // TODO: Send icmp packet
+        std::cerr << "[DEBUG] Sending ICMP echo reply...\n";
+        const Interface* tmp_iface = findIfaceByName(inface);
+        
+        // This is the return/reply datapack
+        Buffer reply(packet);
+        
+        uint8_t* original_hdr = (uint8_t *)packet.data();
+        uint8_t* reply_hdr = (uint8_t *)reply.data();
+        ethernet_hdr* original_ether = (ethernet_hdr *)packet.data();
+        ethernet_hdr* reply_ether = (ethernet_hdr *)reply.data();
+        ip_hdr* original_ip = (ip_hdr *)(packet.data() + sizeof(ethernet_hdr));
+        ip_hdr* reply_ip = (ip_hdr *)(reply.data() + sizeof(ethernet_hdr));
+        icmp_hdr* original_icmp = (icmp_hdr *)(packet.data() + sizeof(ether_hdr) + sizeof(ip_hdr));
+        icmp_hdr* reply_icmp = (icmp_hdr *)(reply.data() + sizeof(ether_hdr) + sizeof(ip_hdr));
+        
+        // Create ethernet header
+        memcpy(reply_ether -> ether_shost, tmp_iface -> addr.data(), ETHER_ADDR_LEN);
+        memcpy(reply_ether -> ether_dhost, original_ether -> ether_shost, ETHER_ADDR_LEN);
+        reply_ether -> ether_type = original_ether -> ether_type;
+        
+        // Create ip header
+        reply_ip -> ip_len = htons(packet.size() - sizeof(ether_hdr));
+        reply_ip -> ip_ttl = 64;
+        reply_ip -> ip_p = ip_protocol_icmp;
+        // Swap src and dst
+        reply_ip -> ip_src = original_ip -> ip_dst;
+        reply_ip -> ip_dst = original_ip -> ip_src;
+        reply_ip -> ip_sum = 0;
+        reply_ip -> ip_sum = cksum(reply_ip, sizeof(ip_hdr));
+        
+        // Create icmp header
+        reply_icmp -> icmp_type = 0;
+        reply_icmp -> icmp_code = 0;
+        reply_icmp -> icmp_id = original_icmp -> icmp_id;
+        reply_icmp -> icmp_seq = original_icmp -> icmp_seq;
+        reply_icmp -> icmp_sum = 0;
+        reply_icmp -> icmp_sum = cksum(reply_icmp, reply.size() - (sizeof(ethernet_hdr) + sizeof(ip_hdr)));
+        
+        // Prepare to send
+        std::cerr << "[DEBUG] ICMP reply header is prepared, preparing to send...\n";
+        RoutingTableEntry routing_entry = m_routingTable.lookup(original_hdr -> ip_dst);
+        if (!m_arp.lookup(routing_entry.gw)) {
+            std::cerr << "[WARNING] No arp\nTrying to request...\n";
+            m_arp.queueRequest(original_hdr -> ip_dst, reply, tmp_iface -> name);
+            m_arp.periodicCheckArpRequestsAndCacheEntries();
+            return;
+        }
+        sendPacket(reply, tmp_iface -> name);
+        
+        // Send complete
+        std::cerr << "[DEBUG] send ICMP reply sucess.\n";
+    }
+    
+    else {
+        // TODO: Forward to the next hop
+        if (ip_header -> ip_ttl <= 1) {
+            return;
+        }
+        ip_header -> ip_ttl --;
+        Buffer forward(packet);
+        ip_hdr* forward_ip_hdr = (ip_hdr *)(forward.data() + sizeof(ethernet_hdr));
+        
+        // recalculate checksum
+        forward_ip_hdr -> ip_sum = 0;
+        forward_ip_hdr -> ip_sum = cksum(forward_ip_hdr, sizeof(ip_hdr));
+        RoutingTableEntry routing_entry = m_routingTable.lookup(forward_ip_hdr -> ip_dst);
+        const Interface* nextHop = findIfaceByName(routing_entry.ifName);
+        if (!nextHop) {
+            std::cerr << "[ERROR] Cannot find entry in the routing table!\n";
+            return;
+        }
+        
+        ethernet_hdr* forward_ether_hdr = (ethernet_hdr *)forward.data();
+        forward_ether_hdr -> ether_type = htons(ethertype_ip);
+        memcpy(forward_ether_hdr -> ether_shost, nextHop -> addr.data(), ETHER_ADDR_LEN);
+        
+        if (!m_arp.lookup(routing_entry.gw)) {
+            m_arp.queueRequest(ip_header -> ip_dst, forward, nextHop -> name);
+            m_arp.periodicCheckArpRequestsAndCacheEntries();
+            return;
+        }
+        auto nexthop_iface = m_arp.lookup(routing_entry.gw);
+        
+        memcpy(forward_ether_hdr -> ether_dhost, nexthop_iface -> mac.data(), ETHER_ADDR_LEN);
+        sendPacket(forward, nextHop -> name);
+        std::cerr << "[DEBUG] Forwarded packet to the next hop.\n";
+    }
+    
+    
+}
+//
+//void SimpleRouter::handle_ip(Buffer& mutable_packet, uint8_t* sender_mac, const Interface* iface) {
+//    ehternet_hdr* ehter_h = (ethernet_hdr *)mutable_packet.data();
+//    ip_hdr* ip_header = (ip_hdr *)(mutable_packet.data() + sizeof(ethernet_hdr));
+//
+//    // TODO: Verify packet size
+//    if (mutable_packet.size() < (sizeof(ethernet_hdr) + sizeof(ip_hdr))) {
+//        std::cerr << "[handle_ip] IPv4 packet received, but the size is too small.\n";
+//        return;
+//    }
+//
+//    // TODO: Verify checksum
+//    uint16_t checksum = ip_header -> ip_sum;
+//    // reset to 0 after store the temp checksum value
+//    ip_header -> ip_sum = 0;
+//
+//    if (checksum != cksum(ip_header, sizeof(ip_hdr))) {
+//        std::cerr << "[handle_ip] IPv4 packet received, but the checksum value is incorrect.\n";
+//        return;
+//    }
+//
+//    /*
+//      ##############
+//        TODO: NAT!!
+//      ##############
+//     */
+//
+//    const Interface* dest = findIfaceByIp(ip_header -> ip_dst);
+//
+//    if (dest) {
+//        // Case (1), packet is destined to this router
+//        std::cerr << "[DEBUG] handle_ip: ICMP is detined for this router\n";
+//
+//        if (ip_header -> ip_p != ip_protocol_icmp) {
+//            std::cerr << "[ERROR] handle_ip: Protocol is not icmp.\n";
+//            return;
+//        }
+//        if (!m_arp.lookup(ip_header -> ip_src)) {
+//            Buffer src_addr(sender_mac, sender_mac + ETHER_ADDR_LEN);
+//            m_arp.insertArpEntry(src_addr, ip_header -> ip_src);
+//        }
+//        icmp_hdr *icmp_header = (icmp_hdr *)(mutable_packet.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
+//        if (icmp_header -> icmp_type != 8) {
+//            std::cerr << "[ERROR] hadnle_ip: icmp_type is not 8: " << icmp_header->icmp_type << std::endl;
+//            return;
+//        }
+//        // TODO: send ICMP reply
+//
+//    }
+//    else {
+//        std::cerr << "[DEBUG] handle_ip: forwarding...\n";
+//        if (ip_header -> ip_ttl <= 1) {
+//            std::cerr << "[WARNING] TTL is out of time.\n";
+//            return;
+//        }
+//
+//        // TODO: Forward IP packet
+//    }
+//
+//}
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 

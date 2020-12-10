@@ -14,18 +14,40 @@ namespace simple_router {
 void
 NatTable::checkNatTable()
 {
+    for (auto iter = m_natTable.begin(); iter != m_natTable.end(); iter ++) {
+        if (!iter -> second -> isValid) {
+            m_natTable.erase(iter->first);
+            iter --;
+        }
+    }
 }
 
 std::shared_ptr<NatEntry>
 NatTable::lookup(uint16_t id)
 {
-  return nullptr;
+    if (m_natTable.find(id) != m_natTable.end()) {
+        return (m_natTable.find(id) -> second);
+    }
+    return nullptr;
 }
 
 
 void
 NatTable::insertNatEntry(uint16_t id, uint32_t in_ip, uint32_t ex_ip)
 {
+    auto existed = lookup(id);
+    if (!existed) {
+        std::shared_ptr<NatEntry> tmp_entry = std::shared_ptr<NatEntry>();
+        tmp_entry -> internal_ip = in_ip;
+        tmp_entry -> external_ip = ex_ip;
+        tmp_entry -> timeUsed = steady_clock::now();
+        tmp_entry -> isValid = true;
+        auto new_entry = {id, tmp_entry};
+        m_natTable.insertNatEntry(new_entry);
+    }
+    else {
+        existed -> timeUsed = steady_clock::now();
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////

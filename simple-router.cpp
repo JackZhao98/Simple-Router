@@ -164,7 +164,70 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
      */
     
     bool NAT_processed = false;
-    
+    switch (nat_flag) {
+        case 1:
+            icmp_hdr *icmp_header = (icmp_hdr *)(new_packet.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
+            ip_hdr *ip_h = (ip_hdr *)(new_packet.data() + sizeof(ethernet_hdr));
+            const Interface* internal_iface = findIfaceByName(inface);
+            uint32_t internal_ip = 0;
+            uint32_t external_ip = 0;
+            auto found_nat = m_natTable.lookup(icmp_header -> icmp_id);
+            if (found_nat) {
+                std::cerr << "[DEBUG] Found NAT! Converting...\n";
+                internal_ip = found_nat -> internal_ip;
+                external_ip = found_nat -> external_ip;
+                found_nat -> timeUsed = steady_clock::now();
+            }
+            if (icmp_header -> icmp_type == 8) {
+                std::cerr << "[DEBUG] Type 8, NAT processed!\n";
+                if (!found_nat) {
+                    internal_ip = internal_iface -> ip;
+                    // Assign external ip
+                    external_ip = 0;
+                    for (auto iter = m_routingTable.begin(); iter != m_routingTable.end(); iter ++) {
+                        auto tmp = m_routingTable.lookup(iter -> ip);
+                        if (!tmp -> dest) {
+                            external_ip = iter -> ip;
+                            break;
+                        }
+                        else if (tmp -> gw != internal_ip && tmp -> dest != internal_ip) {
+                            external_ip = iter -> ip;
+                            break;
+                        }
+                        else
+                            continue;
+                    }
+                    if (!external_ip) {
+                        std::cerr << "[ERROR] Oops, no external ip can be assigned!\n";
+                        return;
+                    }
+                    else {
+                        std::cerr << "[DEBUG] External ip is now: " << ipToString(external_ip) << std::endl;
+                    }
+                    
+                    auto tmp_dst = findIfaceByName(ip_h -> ip_dst);
+                    if (!tmp_dst) {
+                        NAT_processed = !NAT_processed;
+                        m_natTable.insertNatEntry(icmp_header -> icmp_id, internal_ip, external_ip);
+                        ip_h -> ip_src = external_ip;
+                    }
+                    else {}
+                }
+                else if (found_nat) {
+                    NAT_processed = !NAT_processed;
+                    // Having NAT found,
+                    // Change the destination ip to the internal ip address
+                    ip_h -> ip_dst = internal_ip; // necessary?
+                    ip_h -> ip_dst = m_routingTable.lookup(internal_ip).gw;
+                }
+                std::cerr << "[DEBUG] NAT is done.\n";
+                std::cerr << "\tInternal: " << ipToString(internal_ip) << std::endl;
+                std::cerr << "\tExternal: " << ipToString(external_ip) << std::endl;
+            }
+            break;
+        default:
+            break;
+    }
     /*
       ##############
         END OF NAT!!

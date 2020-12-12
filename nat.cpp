@@ -47,8 +47,7 @@ NatTable::insertNatEntry(uint16_t id, uint32_t in_ip, uint32_t ex_ip)
         tmp_entry -> external_ip = ex_ip;
         tmp_entry -> timeUsed = steady_clock::now();
         tmp_entry -> isValid = true;
-        //auto new_entry = {id, tmp_entry};
-        m_natTable.insert({id, tmp_entry});
+        m_natTable.insert(std::pair<uint16_t, std::shared_ptr<NatEntry>>(id, tmp_entry));
     }
     else {
         existed -> timeUsed = steady_clock::now();

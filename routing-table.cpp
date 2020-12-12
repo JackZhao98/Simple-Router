@@ -33,28 +33,31 @@ RoutingTable::lookup(uint32_t ip) const
 {
 
   // FILL THIS IN
-    // for (auto iter = m_entries.begin(); iter != m_entries.end(); iter++) {
-    //     uint32_t mask_1 = iter -> mask & iter -> dest;
-    //     uint32_t mask_2 = iter -> mask & ip;
-    //     if (mask_1 == mask_2) {
-    //         return *iter;
-    //     }
-    // }
-    // throw std::runtime_error("Routing entry not found");
-        const RoutingTableEntry *result = nullptr;
-        for (auto &entry : m_entries) {
-            uint32_t mask1 = entry.mask & ip; //the ip after mask
-            uint32_t mask2 = entry.mask & entry.dest; //the dest after mask
-            if (mask1 == mask2) {
-                if (result == nullptr || entry.mask >= result->mask){
-                    result = &entry;
-                }
-            }
+  const RoutingTableEntry *ret = nullptr;
+    for (auto iter = m_entries.begin(); iter != m_entries.end(); iter++) {
+        uint32_t mask_1 = iter -> mask & iter -> dest;
+        uint32_t mask_2 = iter -> mask & ip;
+        if ((mask_1 == mask_2) && (!ret || (iter->mask >= ret->mask))) {
+            ret = &(*iter);
         }
-        if (result == nullptr) {
-            throw std::runtime_error("Routing entry not found");
-        }
-        return *result;
+    }
+    if (!ret)
+      throw std::runtime_error("Routing entry not found");
+    return *ret;
+        // const RoutingTableEntry *result = nullptr;
+        // for (auto &entry : m_entries) {
+        //     uint32_t mask1 = entry.mask & ip; //the ip after mask
+        //     uint32_t mask2 = entry.mask & entry.dest; //the dest after mask
+        //     if (mask1 == mask2) {
+        //         if (result == nullptr || entry.mask >= result->mask){
+        //             result = &entry;
+        //         }
+        //     }
+        // }
+        // if (result == nullptr) {
+        //     throw std::runtime_error("Routing entry not found");
+        // }
+        // return *result;
 }
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////

@@ -44,15 +44,14 @@ SimpleRouter::handlePacket(const Buffer& packet, const std::string& inIface, int
         std::cerr << "[ERROR] Wrong packet length! Ignored.\n";
         return;
     }
-    
-    
+
     
     // Then, verify the address.
     std::string iface_addr = macToString(iface -> addr);
     std::string packet_dest = macToString(packet);
 
     if ((packet_dest != iface_addr) && (packet_dest != "FF:FF:FF:FF:FF:FF") && (packet_dest != "ff:ff:ff:ff:ff:ff")) {
-        std::cerr << "[NOTE] Packet not destined to this router!\n";
+        std::cerr << "[WARNING] Packet not destined to this router!\n";
         return;
     }
     
@@ -75,10 +74,6 @@ SimpleRouter::handlePacket(const Buffer& packet, const std::string& inIface, int
     }
 }
 
-// void SimpleRouter::handle_arpPack(const arp_hdr* arp, const Interface* iface) {
-//     auto ARP_OP = ntohs(arp -> arp_op);
-
-// }
 // New Class methods, TODO: Add definition to hpp file
 void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface* iface) {
     arp_hdr* arp_header = (arp_hdr*)arp;
@@ -255,8 +250,8 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         Buffer reply(packet.size());
         memcpy(reply.data(), packet.data(), packet.size());
 
-        // uint8_t* original_hdr = (uint8_t *)packet.data();
-        //uint8_t* reply_hdr = (uint8_t *)reply.data();
+
+        // Create header pointer variables for later use
         ethernet_hdr* original_ether = (ethernet_hdr *)packet.data();
         ethernet_hdr* reply_ether = (ethernet_hdr *)reply.data();
         ip_hdr* original_ip = (ip_hdr *)(packet.data() + sizeof(ethernet_hdr));
@@ -276,14 +271,18 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         // Swap src and dst
         reply_ip -> ip_src = original_ip -> ip_dst;
         reply_ip -> ip_dst = original_ip -> ip_src;
+
+        // Recalculate the checksum
         reply_ip -> ip_sum = 0;
         reply_ip -> ip_sum = cksum(reply_ip, sizeof(ip_hdr));
         
+
         // Create icmp header
         reply_icmp -> icmp_type = 0;
         reply_icmp -> icmp_code = 0;
         reply_icmp -> icmp_id = original_icmp -> icmp_id;
         reply_icmp -> icmp_seq = original_icmp -> icmp_seq;
+        // recalculate icmp checksum
         reply_icmp -> icmp_sum = 0;
         reply_icmp -> icmp_sum = cksum(reply_icmp, reply.size() - (sizeof(ethernet_hdr) + sizeof(ip_hdr)));
         
@@ -292,11 +291,12 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         auto routing_entry = m_routingTable.lookup(original_ip -> ip_dst);
         std::cerr << "\t[DEBUG] reply:    ip_dst is :" << ipToString(reply_ip -> ip_dst) << std::endl;
         std::cerr << "\t[DEBUG] original: ip_src is :" << ipToString(original_ip -> ip_src) << std::endl;
+        
+        // If the entry is not cached, pull a request
         if (m_arp.lookup(routing_entry.gw) == nullptr) {
             std::cerr << "[WARNING] No arp, Trying to request...\n";
             m_arp.queueRequest(original_ip -> ip_dst, reply, tmp_iface -> name);
             m_arp.periodicCheckArpRequestsAndCacheEntries();
-            // return;
         }
         sendPacket(reply, tmp_iface -> name);
         
@@ -329,11 +329,6 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         memcpy(forward_ether_hdr -> ether_shost, nextHop -> addr.data(), ETHER_ADDR_LEN);
         forward_ether_hdr -> ether_type = htons(ethertype_ip);
 
-        // if (m_arp.lookup(routing_entry.gw) == nullptr) {
-        //     m_arp.queueRequest(ip_header -> ip_dst, forward, nextHop -> name);
-        //     m_arp.periodicCheckArpRequestsAndCacheEntries();
-        //     return;
-        // }
         auto nexthop_iface = m_arp.lookup(routing_entry.gw);
         
         if (!nexthop_iface) {

@@ -31,10 +31,12 @@ void
 ArpCache::periodicCheckArpRequestsAndCacheEntries()
 {
     for (auto iter = m_arpRequests.begin(); iter != m_arpRequests.end(); iter++) {
+        // Remove requests that are too old
         if ((*iter) -> nTimesSent >= MAX_SENT_TIME) {
             removeRequest(*iter);
             iter --;
         }
+        // Discard arp requests that are within in 1 second.
         else if (steady_clock::now() - (*iter)->timeSent < std::chrono::seconds(1)) {
             continue;
         }
@@ -58,7 +60,7 @@ ArpCache::periodicCheckArpRequestsAndCacheEntries()
             buffer_arp -> arp_hrd = htons(arp_hrd_ethernet);
             buffer_arp -> arp_pro = htons(ethertype_ip);
             buffer_arp -> arp_hln = ETHER_ADDR_LEN;
-            buffer_arp -> arp_pln = 0x04;
+            buffer_arp -> arp_pln = 4;
             buffer_arp -> arp_op = htons(arp_op_request);
             std::memcpy(buffer_arp->arp_sha, iface->addr.data(), ETHER_ADDR_LEN);
             buffer_arp -> arp_sip = iface -> ip;

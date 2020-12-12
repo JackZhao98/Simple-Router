@@ -43,7 +43,9 @@ public:
    */
   void
   handlePacket(const Buffer& packet, const std::string& inIface, int nat_flag);
-
+    
+    void handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface* iface);
+    void handle_ipv4(const Buffer& packet, const std::string &inface, int& nat);
   /**
    * USE THIS METHOD TO SEND PACKETS
    *

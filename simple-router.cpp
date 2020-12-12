@@ -58,7 +58,7 @@ SimpleRouter::handlePacket(const Buffer& packet, const std::string& inIface, int
     
     Buffer packet_copy(packet);
     uint8_t* packet_hdr = packet_copy.data();
-    ethernet_hdr* ether_hdr = (ethernet_hdr*)packet_header;
+    ethernet_hdr* ether_hdr = (ethernet_hdr*)packet_hdr;
     
     auto ether_type = ether_hdr -> ether_type;
     if (ether_type == htons(ethertype_arp)) {
@@ -75,6 +75,10 @@ SimpleRouter::handlePacket(const Buffer& packet, const std::string& inIface, int
     }
 }
 
+// void SimpleRouter::handle_arpPack(const arp_hdr* arp, const Interface* iface) {
+//     auto ARP_OP = ntohs(arp -> arp_op);
+
+// }
 // New Class methods, TODO: Add definition to hpp file
 void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface* iface) {
     arp_hdr* arp_header = (arp_hdr*)arp;
@@ -122,7 +126,7 @@ void SimpleRouter::handle_arp(uint8_t* arp, uint8_t* sender_mac, const Interface
         std::shared_ptr<ArpRequest> request = m_arp.insertArpEntry(mac, sip);
         
         if (request) {
-            for (auto packetIter = request -> packets.begin(); packetIter != packets.end(); packetIter ++) {
+            for (auto packetIter = request -> packets.begin(); packetIter != request -> packets.end(); packetIter ++) {
                 ethernet_hdr * tmp_e_header = (ethernet_hdr *)(packetIter -> packet.data());
                 memcpy(tmp_e_header -> ether_shost, iface -> addr.data(), ETHER_ADDR_LEN);
                 memcpy(tmp_e_header -> ether_dhost, arp_header -> arp_sha, ETHER_ADDR_LEN);
@@ -164,8 +168,7 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
      */
     
     bool NAT_processed = false;
-    switch (nat_flag) {
-        case 1:
+    if (nat == 1) {
             icmp_hdr *icmp_header = (icmp_hdr *)(new_packet.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
             ip_hdr *ip_h = (ip_hdr *)(new_packet.data() + sizeof(ethernet_hdr));
             const Interface* internal_iface = findIfaceByName(inface);
@@ -184,13 +187,13 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
                     internal_ip = internal_iface -> ip;
                     // Assign external ip
                     external_ip = 0;
-                    for (auto iter = m_routingTable.begin(); iter != m_routingTable.end(); iter ++) {
-                        auto tmp = m_routingTable.lookup(iter -> ip);
-                        if (!tmp -> dest) {
+                    for (auto iter = m_ifaces.begin(); iter != m_ifaces.end(); iter ++) {
+                        const auto& tmp = m_routingTable.lookup(iter -> ip);
+                        if (!tmp.dest) {
                             external_ip = iter -> ip;
                             break;
                         }
-                        else if (tmp -> gw != internal_ip && tmp -> dest != internal_ip) {
+                        else if (tmp.gw != internal_ip && tmp.dest != internal_ip) {
                             external_ip = iter -> ip;
                             break;
                         }
@@ -205,7 +208,7 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
                         std::cerr << "[DEBUG] External ip is now: " << ipToString(external_ip) << std::endl;
                     }
                     
-                    auto tmp_dst = findIfaceByName(ip_h -> ip_dst);
+                    auto tmp_dst = findIfaceByIp(ip_h -> ip_dst);
                     if (!tmp_dst) {
                         NAT_processed = !NAT_processed;
                         m_natTable.insertNatEntry(icmp_header -> icmp_id, internal_ip, external_ip);
@@ -224,9 +227,6 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
                 std::cerr << "\tInternal: " << ipToString(internal_ip) << std::endl;
                 std::cerr << "\tExternal: " << ipToString(external_ip) << std::endl;
             }
-            break;
-        default:
-            break;
     }
     /*
       ##############
@@ -252,16 +252,17 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         const Interface* tmp_iface = findIfaceByName(inface);
         
         // This is the return/reply datapack
-        Buffer reply(packet);
-        
-        uint8_t* original_hdr = (uint8_t *)packet.data();
-        uint8_t* reply_hdr = (uint8_t *)reply.data();
+        Buffer reply(packet.size());
+        memcpy(reply.data(), packet.data(), packet.size());
+
+        // uint8_t* original_hdr = (uint8_t *)packet.data();
+        //uint8_t* reply_hdr = (uint8_t *)reply.data();
         ethernet_hdr* original_ether = (ethernet_hdr *)packet.data();
         ethernet_hdr* reply_ether = (ethernet_hdr *)reply.data();
         ip_hdr* original_ip = (ip_hdr *)(packet.data() + sizeof(ethernet_hdr));
         ip_hdr* reply_ip = (ip_hdr *)(reply.data() + sizeof(ethernet_hdr));
-        icmp_hdr* original_icmp = (icmp_hdr *)(packet.data() + sizeof(ether_hdr) + sizeof(ip_hdr));
-        icmp_hdr* reply_icmp = (icmp_hdr *)(reply.data() + sizeof(ether_hdr) + sizeof(ip_hdr));
+        icmp_hdr* original_icmp = (icmp_hdr *)(packet.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
+        icmp_hdr* reply_icmp = (icmp_hdr *)(reply.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
         
         // Create ethernet header
         memcpy(reply_ether -> ether_shost, tmp_iface -> addr.data(), ETHER_ADDR_LEN);
@@ -269,8 +270,8 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         reply_ether -> ether_type = original_ether -> ether_type;
         
         // Create ip header
-        reply_ip -> ip_len = htons(packet.size() - sizeof(ether_hdr));
-        reply_ip -> ip_ttl = 64;
+        reply_ip -> ip_len = htons(packet.size() - sizeof(ethernet_hdr));
+        reply_ip -> ip_ttl = 64;    // set ttl
         reply_ip -> ip_p = ip_protocol_icmp;
         // Swap src and dst
         reply_ip -> ip_src = original_ip -> ip_dst;
@@ -288,12 +289,14 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         
         // Prepare to send
         std::cerr << "[DEBUG] ICMP reply header is prepared, preparing to send...\n";
-        RoutingTableEntry routing_entry = m_routingTable.lookup(original_hdr -> ip_dst);
-        if (!m_arp.lookup(routing_entry.gw)) {
-            std::cerr << "[WARNING] No arp\nTrying to request...\n";
-            m_arp.queueRequest(original_hdr -> ip_dst, reply, tmp_iface -> name);
+        auto routing_entry = m_routingTable.lookup(original_ip -> ip_dst);
+        std::cerr << "\t[DEBUG] reply:    ip_dst is :" << ipToString(reply_ip -> ip_dst) << std::endl;
+        std::cerr << "\t[DEBUG] original: ip_src is :" << ipToString(original_ip -> ip_src) << std::endl;
+        if (m_arp.lookup(routing_entry.gw) == nullptr) {
+            std::cerr << "[WARNING] No arp, Trying to request...\n";
+            m_arp.queueRequest(original_ip -> ip_dst, reply, tmp_iface -> name);
             m_arp.periodicCheckArpRequestsAndCacheEntries();
-            return;
+            // return;
         }
         sendPacket(reply, tmp_iface -> name);
         
@@ -307,7 +310,8 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
             return;
         }
         ip_header -> ip_ttl --;
-        Buffer forward(packet);
+        Buffer forward(packet.size());
+        memcpy(forward.data(), packet.data(), packet.size());
         ip_hdr* forward_ip_hdr = (ip_hdr *)(forward.data() + sizeof(ethernet_hdr));
         
         // recalculate checksum
@@ -321,16 +325,24 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
         }
         
         ethernet_hdr* forward_ether_hdr = (ethernet_hdr *)forward.data();
-        forward_ether_hdr -> ether_type = htons(ethertype_ip);
-        memcpy(forward_ether_hdr -> ether_shost, nextHop -> addr.data(), ETHER_ADDR_LEN);
         
-        if (!m_arp.lookup(routing_entry.gw)) {
-            m_arp.queueRequest(ip_header -> ip_dst, forward, nextHop -> name);
+        memcpy(forward_ether_hdr -> ether_shost, nextHop -> addr.data(), ETHER_ADDR_LEN);
+        forward_ether_hdr -> ether_type = htons(ethertype_ip);
+
+        // if (m_arp.lookup(routing_entry.gw) == nullptr) {
+        //     m_arp.queueRequest(ip_header -> ip_dst, forward, nextHop -> name);
+        //     m_arp.periodicCheckArpRequestsAndCacheEntries();
+        //     return;
+        // }
+        auto nexthop_iface = m_arp.lookup(routing_entry.gw);
+        
+        if (!nexthop_iface) {
+            m_arp.queueRequest(forward_ip_hdr -> ip_dst, forward, nextHop -> name) -> nTimesSent = 0;
             m_arp.periodicCheckArpRequestsAndCacheEntries();
             return;
         }
-        auto nexthop_iface = m_arp.lookup(routing_entry.gw);
-        
+        std::cerr << "[DEBUG] Forwarded...\n";
+        print_hdrs(forward);
         memcpy(forward_ether_hdr -> ether_dhost, nexthop_iface -> mac.data(), ETHER_ADDR_LEN);
         sendPacket(forward, nextHop -> name);
         std::cerr << "[DEBUG] Forwarded packet to the next hop.\n";
@@ -338,66 +350,6 @@ void SimpleRouter::handle_ipv4(const Buffer& packet, const std::string &inface, 
     
     
 }
-//
-//void SimpleRouter::handle_ip(Buffer& mutable_packet, uint8_t* sender_mac, const Interface* iface) {
-//    ehternet_hdr* ehter_h = (ethernet_hdr *)mutable_packet.data();
-//    ip_hdr* ip_header = (ip_hdr *)(mutable_packet.data() + sizeof(ethernet_hdr));
-//
-//    // TODO: Verify packet size
-//    if (mutable_packet.size() < (sizeof(ethernet_hdr) + sizeof(ip_hdr))) {
-//        std::cerr << "[handle_ip] IPv4 packet received, but the size is too small.\n";
-//        return;
-//    }
-//
-//    // TODO: Verify checksum
-//    uint16_t checksum = ip_header -> ip_sum;
-//    // reset to 0 after store the temp checksum value
-//    ip_header -> ip_sum = 0;
-//
-//    if (checksum != cksum(ip_header, sizeof(ip_hdr))) {
-//        std::cerr << "[handle_ip] IPv4 packet received, but the checksum value is incorrect.\n";
-//        return;
-//    }
-//
-//    /*
-//      ##############
-//        TODO: NAT!!
-//      ##############
-//     */
-//
-//    const Interface* dest = findIfaceByIp(ip_header -> ip_dst);
-//
-//    if (dest) {
-//        // Case (1), packet is destined to this router
-//        std::cerr << "[DEBUG] handle_ip: ICMP is detined for this router\n";
-//
-//        if (ip_header -> ip_p != ip_protocol_icmp) {
-//            std::cerr << "[ERROR] handle_ip: Protocol is not icmp.\n";
-//            return;
-//        }
-//        if (!m_arp.lookup(ip_header -> ip_src)) {
-//            Buffer src_addr(sender_mac, sender_mac + ETHER_ADDR_LEN);
-//            m_arp.insertArpEntry(src_addr, ip_header -> ip_src);
-//        }
-//        icmp_hdr *icmp_header = (icmp_hdr *)(mutable_packet.data() + sizeof(ethernet_hdr) + sizeof(ip_hdr));
-//        if (icmp_header -> icmp_type != 8) {
-//            std::cerr << "[ERROR] hadnle_ip: icmp_type is not 8: " << icmp_header->icmp_type << std::endl;
-//            return;
-//        }
-//        // TODO: send ICMP reply
-//
-//    }
-//    else {
-//        std::cerr << "[DEBUG] handle_ip: forwarding...\n";
-//        if (ip_header -> ip_ttl <= 1) {
-//            std::cerr << "[WARNING] TTL is out of time.\n";
-//            return;
-//        }
-//
-//        // TODO: Forward IP packet
-//    }
-//
-//}
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 

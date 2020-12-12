@@ -20,34 +20,41 @@ NatTable::checkNatTable()
             iter --;
         }
     }
+
 }
 
 std::shared_ptr<NatEntry>
 NatTable::lookup(uint16_t id)
 {
-    if (m_natTable.find(id) != m_natTable.end()) {
-        return (m_natTable.find(id) -> second);
+  std::cerr << "[NAT] before NAT lookup\n";
+  auto found = m_natTable.find(id);
+    if (found == m_natTable.end()) {
+        return nullptr;
     }
-    return nullptr;
+    std::cerr << "[NAT] after NAT lookup\n";
+    return found -> second;
 }
 
 
 void
 NatTable::insertNatEntry(uint16_t id, uint32_t in_ip, uint32_t ex_ip)
 {
+  std::cerr << "[NAT] before insertNatEntry\n";
     auto existed = lookup(id);
     if (!existed) {
-        std::shared_ptr<NatEntry> tmp_entry = std::shared_ptr<NatEntry>();
+        auto tmp_entry = std::make_shared<NatEntry>();
         tmp_entry -> internal_ip = in_ip;
         tmp_entry -> external_ip = ex_ip;
         tmp_entry -> timeUsed = steady_clock::now();
         tmp_entry -> isValid = true;
-        auto new_entry = {id, tmp_entry};
-        m_natTable.insertNatEntry(new_entry);
+        //auto new_entry = {id, tmp_entry};
+        m_natTable.insert({id, tmp_entry});
     }
     else {
         existed -> timeUsed = steady_clock::now();
+        return;
     }
+    std::cerr << "[NAT] After insertNatEntry\n";
 }
 
 //////////////////////////////////////////////////////////////////////////

@@ -31,12 +31,17 @@ void
 ArpCache::periodicCheckArpRequestsAndCacheEntries()
 {
     for (auto iter = m_arpRequests.begin(); iter != m_arpRequests.end(); iter++) {
-        if ((*iter) -> nTimeSent >= MAX_SENT_TIME) {
-            m_arpRequests.erase(iter);
+        if ((*iter) -> nTimesSent >= MAX_SENT_TIME) {
+            removeRequest(*iter);
             iter --;
         }
+        else if (steady_clock::now() - (*iter)->timeSent < std::chrono::seconds(1)) {
+            continue;
+        }
         else {
-            const Interface* iface = m_router.findIfaceByName((*iter)->packets.front().iface);
+            (*iter) -> nTimesSent ++;
+            auto route = m_router.getRoutingTable().lookup((*iter) -> ip);
+            auto iface = m_router.findIfaceByName(route.ifName);
             if (!iface) {
                 std::cerr << "[ERROR] periodicCheck: out interface is null\n";
                 continue;
@@ -48,28 +53,29 @@ ArpCache::periodicCheckArpRequestsAndCacheEntries()
             std::memcpy(buffer_ether->ether_shost, iface -> addr.data(), ETHER_ADDR_LEN);
             std::memcpy(buffer_ether->ether_dhost, BroadcastEtherAddr, ETHER_ADDR_LEN);
             buffer_ether -> ether_type = htons(ethertype_arp);
-            
             // Create arp header
             arp_hdr* buffer_arp = (arp_hdr *)(bufferPacket.data() + sizeof(ethernet_hdr));
             buffer_arp -> arp_hrd = htons(arp_hrd_ethernet);
             buffer_arp -> arp_pro = htons(ethertype_ip);
             buffer_arp -> arp_hln = ETHER_ADDR_LEN;
-            buffer_arp -> arp_pln = 4;
+            buffer_arp -> arp_pln = 0x04;
             buffer_arp -> arp_op = htons(arp_op_request);
             std::memcpy(buffer_arp->arp_sha, iface->addr.data(), ETHER_ADDR_LEN);
             buffer_arp -> arp_sip = iface -> ip;
-            std::memcpy(buffer_arp->arp_tha, BroadcastEtherAddr, ETHER_ADDR_LEN);
+            std::memset(buffer_arp->arp_tha, 0, ETHER_ADDR_LEN);
             buffer_arp -> arp_tip = (*iter) -> ip;
             
-            std::cerr << "[DEBUG] Ready to send: " << (*iter)->packets.front().iface << std::endl;
-            m_router.sendPacket(bufferPacket, (*iter)->packets.front().iface);
+            std::cerr << "[DEBUG] Ready to send arp request: " << iface->name << std::endl;
+            m_router.sendPacket(bufferPacket, iface->name);
+            std::cerr << "[DEBUG] ARP request should be sent, the arp buffer packet\n";
+            print_hdrs(bufferPacket);
             (*iter) -> timeSent = steady_clock::now();
-            (*iter) -> nTimeSent ++;
+            
         }
         
     }
-    for (auto iter = m_cacheEntries.begin(); iter != m_cacheEntries; iter++) {
-        if (!(*iter)->isValid) {
+    for (auto iter = m_cacheEntries.begin(); iter != m_cacheEntries.end(); iter++) {
+        if (!((*iter)->isValid)) {
             iter = m_cacheEntries.erase(iter);
             iter --;
         }

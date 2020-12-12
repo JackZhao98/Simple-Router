@@ -14,6 +14,10 @@ namespace simple_router {
 void
 NatTable::checkNatTable()
 {
+    if (m_natTable.size() == 1 && !(m_natTable.begin()->second->isValid)) {
+      m_natTable.clear();
+      return;
+    }
     for (auto iter = m_natTable.begin(); iter != m_natTable.end(); iter ++) {
         if (!iter -> second -> isValid) {
             m_natTable.erase(iter->first);
@@ -26,20 +30,20 @@ NatTable::checkNatTable()
 std::shared_ptr<NatEntry>
 NatTable::lookup(uint16_t id)
 {
-  std::cerr << "[NAT] before NAT lookup\n";
-  auto found = m_natTable.find(id);
-    if (found == m_natTable.end()) {
-        return nullptr;
-    }
-    std::cerr << "[NAT] after NAT lookup\n";
-    return found -> second;
+    std::cerr << "[NAT] before NAT lookup\n";
+    auto found = m_natTable.find(id);
+      if (found == m_natTable.end()) {
+          return nullptr;
+      }
+      std::cerr << "[NAT] after NAT lookup\n";
+      return found -> second;
 }
 
 
 void
 NatTable::insertNatEntry(uint16_t id, uint32_t in_ip, uint32_t ex_ip)
 {
-  std::cerr << "[NAT] before insertNatEntry\n";
+    std::cerr << "[NAT] before insertNatEntry\n";
     auto existed = lookup(id);
     if (!existed) {
         auto tmp_entry = std::make_shared<NatEntry>();
@@ -100,7 +104,6 @@ NatTable::ticker()
           entryIt->second->isValid = false;
         }
       }
-
       checkNatTable();
     }
   }
